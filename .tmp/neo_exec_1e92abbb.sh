@@ -1,1 +1,0 @@
-cd /Users/somatothing/Desktop/devs/repo_name/boards && git add -A && git commit -m "Fix: SpreadTensor dimension handling and test data generation for realistic volatility" && git push origin main 2>&1 | tail -15
