@@ -1,0 +1,1 @@
+cd /Users/somatothing/Desktop/devs/repo_name/boards && git add -A && git commit -m "Initial project structure with CI/CD workflows"
