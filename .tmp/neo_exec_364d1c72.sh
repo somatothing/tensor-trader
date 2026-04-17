@@ -1,0 +1,1 @@
+cd /Users/somatothing/Desktop/devs/repo_name/boards && git add -A && git commit -m "Add model suite: Decision Tree, XGBoost, and GNN with sklearn fallback"
