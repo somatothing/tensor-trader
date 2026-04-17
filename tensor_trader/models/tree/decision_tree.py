@@ -1,12 +1,12 @@
-"""Decision Tree Classifier for market prediction."""
+"""Decision Tree model for market prediction."""
 import numpy as np
 import pandas as pd
 from typing import Dict, List, Optional, Tuple, Any
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
-import joblib
 import logging
+import pickle
+
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
 logger = logging.getLogger(__name__)
 
@@ -14,8 +14,28 @@ logger = logging.getLogger(__name__)
 class MarketDecisionTree:
     """Decision Tree classifier for market direction prediction."""
     
-    def __init__(self, max_depth: int = 10, min_samples_split: int = 20,
-                 min_samples_leaf: int = 10, random_state: int = 42):
+    def __init__(self, 
+                 max_depth: int = 10,
+                 min_samples_split: int = 10,
+                 min_samples_leaf: int = 5,
+                 random_state: int = 42):
+        """
+        Initialize Decision Tree model.
+        
+        Args:
+            max_depth: Maximum tree depth
+            min_samples_split: Minimum samples to split a node
+            min_samples_leaf: Minimum samples in leaf node
+            random_state: Random seed
+        """
+        self.max_depth = max_depth
+        self.min_samples_split = min_samples_split
+        self.min_samples_leaf = min_samples_leaf
+        self.random_state = random_state
+        self.feature_names: List[str] = []
+        self.is_trained = False
+        self.metrics: Dict[str, Any] = {}
+        
         self.model = DecisionTreeClassifier(
             max_depth=max_depth,
             min_samples_split=min_samples_split,
@@ -23,17 +43,15 @@ class MarketDecisionTree:
             random_state=random_state,
             class_weight='balanced'
         )
-        self.feature_names: List[str] = []
-        self.is_trained = False
-        self.metrics: Dict[str, Any] = {}
-        
-    def fit(self, X: np.ndarray, y: np.ndarray, 
+    
+    def fit(self, X: np.ndarray, y: np.ndarray,
             feature_names: Optional[List[str]] = None) -> 'MarketDecisionTree':
-        """Train the decision tree model.
+        """
+        Train the Decision Tree model.
         
         Args:
-            X: Feature matrix (n_samples, n_features)
-            y: Target labels (n_samples,)
+            X: Feature matrix
+            y: Target labels
             feature_names: Optional list of feature names
         
         Returns:
@@ -47,55 +65,34 @@ class MarketDecisionTree:
         self.model.fit(X, y)
         self.is_trained = True
         
-        # Calculate feature importance
+        # Feature importance
         if len(self.feature_names) == len(self.model.feature_importances_):
             importance_dict = dict(zip(self.feature_names, self.model.feature_importances_))
             self.metrics['feature_importance'] = dict(sorted(
-                importance_dict.items(), 
-                key=lambda x: x[1], 
+                importance_dict.items(),
+                key=lambda x: x[1],
                 reverse=True
-            )[:20])  # Top 20 features
+            )[:20])
         
         logger.info("Decision Tree training completed")
         return self
     
     def predict(self, X: np.ndarray) -> np.ndarray:
-        """Make predictions.
-        
-        Args:
-            X: Feature matrix
-        
-        Returns:
-            Predicted labels
-        """
+        """Make predictions."""
         if not self.is_trained:
             raise RuntimeError("Model must be trained before prediction")
         return self.model.predict(X)
     
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
-        """Get prediction probabilities.
-        
-        Args:
-            X: Feature matrix
-        
-        Returns:
-            Class probabilities
-        """
+        """Get prediction probabilities."""
         if not self.is_trained:
             raise RuntimeError("Model must be trained before prediction")
         return self.model.predict_proba(X)
     
     def evaluate(self, X: np.ndarray, y: np.ndarray) -> Dict[str, Any]:
-        """Evaluate model performance.
-        
-        Args:
-            X: Feature matrix
-            y: True labels
-        
-        Returns:
-            Dictionary of metrics
-        """
+        """Evaluate model performance."""
         predictions = self.predict(X)
+        probabilities = self.predict_proba(X)
         
         self.metrics.update({
             'accuracy': accuracy_score(y, predictions),
@@ -104,25 +101,6 @@ class MarketDecisionTree:
         })
         
         return self.metrics
-    
-    def cross_validate(self, X: np.ndarray, y: np.ndarray, 
-                      cv: int = 5) -> Dict[str, float]:
-        """Perform cross-validation.
-        
-        Args:
-            X: Feature matrix
-            y: Target labels
-            cv: Number of folds
-        
-        Returns:
-            Cross-validation scores
-        """
-        scores = cross_val_score(self.model, X, y, cv=cv, scoring='accuracy')
-        return {
-            'mean_accuracy': scores.mean(),
-            'std_accuracy': scores.std(),
-            'scores': scores.tolist()
-        }
     
     def get_feature_importance(self) -> Dict[str, float]:
         """Get feature importance scores."""
@@ -136,21 +114,38 @@ class MarketDecisionTree:
     
     def save(self, filepath: str):
         """Save model to disk."""
-        joblib.dump({
+        data = {
             'model': self.model,
             'feature_names': self.feature_names,
             'is_trained': self.is_trained,
-            'metrics': self.metrics
-        }, filepath)
+            'metrics': self.metrics,
+            'params': {
+                'max_depth': self.max_depth,
+                'min_samples_split': self.min_samples_split,
+                'min_samples_leaf': self.min_samples_leaf,
+                'random_state': self.random_state,
+            }
+        }
+        with open(filepath, 'wb') as f:
+            pickle.dump(data, f)
         logger.info(f"Model saved to {filepath}")
     
     def load(self, filepath: str) -> 'MarketDecisionTree':
         """Load model from disk."""
-        data = joblib.load(filepath)
+        with open(filepath, 'rb') as f:
+            data = pickle.load(f)
+        
         self.model = data['model']
         self.feature_names = data['feature_names']
         self.is_trained = data['is_trained']
         self.metrics = data.get('metrics', {})
+        
+        params = data.get('params', {})
+        self.max_depth = params.get('max_depth', 10)
+        self.min_samples_split = params.get('min_samples_split', 10)
+        self.min_samples_leaf = params.get('min_samples_leaf', 5)
+        self.random_state = params.get('random_state', 42)
+        
         logger.info(f"Model loaded from {filepath}")
         return self
 
@@ -167,7 +162,6 @@ if __name__ == '__main__':
     # Evaluate
     metrics = model.evaluate(X, y)
     print(f"Accuracy: {metrics['accuracy']:.4f}")
-    print(f"Top 5 important features: {list(model.metrics['feature_importance'].keys())[:5]}")
     
     # Test prediction
     pred = model.predict(X[:5])

@@ -1,157 +1,194 @@
 """ONNX export functionality for Tensor Trader models."""
 import numpy as np
 import logging
-from typing import Optional, Dict, Any, List
+from typing import Dict, List, Optional, Any
 from pathlib import Path
 import json
 
 logger = logging.getLogger(__name__)
 
-# Check for ONNX support
-try:
-    import skl2onnx
-    from skl2onnx import convert_sklearn
-    from skl2onnx.common.data_types import FloatTensorType
-    SKL2ONNX_AVAILABLE = True
-except ImportError:
-    SKL2ONNX_AVAILABLE = False
-    logger.warning("skl2onnx not available, ONNX export disabled")
-
+# Try to import ONNX libraries
 try:
     import onnx
+    from skl2onnx import convert_sklearn
+    from skl2onnx.common.data_types import FloatTensorType
     ONNX_AVAILABLE = True
 except ImportError:
     ONNX_AVAILABLE = False
-    logger.warning("onnx not available")
+    logger.warning("skl2onnx not available, ONNX export disabled")
 
 try:
     import onnxruntime as ort
     ONNXRUNTIME_AVAILABLE = True
 except ImportError:
     ONNXRUNTIME_AVAILABLE = False
-    logger.warning("onnxruntime not available")
+    logger.warning("onnxruntime not available, ONNX inference disabled")
 
 
 class ONNXExporter:
-    """Export sklearn models to ONNX format."""
+    """Export models to ONNX format."""
     
-    def __init__(self, model: Any, feature_names: Optional[List[str]] = None):
-        self.model = model
-        self.feature_names = feature_names or []
-        self.input_dim = None
+    def __init__(self, output_dir: str = "./models/onnx"):
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
         
-    def export(self, output_path: str, input_dim: Optional[int] = None):
-        """Export model to ONNX format.
-        
-        Args:
-            output_path: Path to save ONNX model
-            input_dim: Input feature dimension (inferred if not provided)
+    def export_sklearn_model(self, 
+                             model: Any, 
+                             model_name: str,
+                             input_dim: int,
+                             opset_version: int = 11) -> Optional[str]:
         """
-        if not SKL2ONNX_AVAILABLE:
-            raise RuntimeError("skl2onnx not available. Install with: pip install skl2onnx")
-        
-        if input_dim is None:
-            # Try to infer from model
-            if hasattr(self.model, 'n_features_in_'):
-                input_dim = self.model.n_features_in_
-            else:
-                raise ValueError("input_dim must be provided or model must have n_features_in_ attribute")
-        
-        self.input_dim = input_dim
-        
-        # Define input type
-        initial_type = [('float_input', FloatTensorType([None, input_dim]))]
-        
-        # Convert model
-        onnx_model = convert_sklearn(self.model, initial_types=initial_type)
-        
-        # Save model
-        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, "wb") as f:
-            f.write(onnx_model.SerializeToString())
-        
-        logger.info(f"Model exported to {output_path}")
-        
-        # Save metadata
-        metadata_path = output_path.replace('.onnx', '_metadata.json')
-        metadata = {
-            'input_dim': input_dim,
-            'feature_names': self.feature_names,
-            'model_type': type(self.model).__name__,
-        }
-        with open(metadata_path, 'w') as f:
-            json.dump(metadata, f, indent=2)
-        
-        return output_path
-    
-    def verify_export(self, onnx_path: str, sample_input: Optional[np.ndarray] = None) -> bool:
-        """Verify ONNX export by loading and running inference.
+        Export a scikit-learn compatible model to ONNX.
         
         Args:
-            onnx_path: Path to ONNX model
-            sample_input: Optional sample input for testing
+            model: Trained sklearn model (XGBoost, DecisionTree, etc.)
+            model_name: Name for the output file
+            input_dim: Number of input features
+            opset_version: ONNX opset version
         
         Returns:
-            True if verification successful
+            Path to exported ONNX file or None if failed
         """
-        if not ONNXRUNTIME_AVAILABLE:
-            logger.warning("onnxruntime not available, skipping verification")
+        if not ONNX_AVAILABLE:
+            logger.error("skl2onnx not available, cannot export")
+            return None
+        
+        try:
+            # Define input type
+            initial_type = [('float_input', FloatTensorType([None, input_dim]))]
+            
+            # Convert model
+            onnx_model = convert_sklearn(model, initial_types=initial_type, target_opset=opset_version)
+            
+            # Save model
+            output_path = self.output_dir / f"{model_name}.onnx"
+            with open(output_path, "wb") as f:
+                f.write(onnx_model.SerializeToString())
+            
+            logger.info(f"Model exported to {output_path}")
+            return str(output_path)
+            
+        except Exception as e:
+            logger.error(f"ONNX export failed: {e}")
+            return None
+    
+    def export_xgboost(self, 
+                       model: Any, 
+                       model_name: str,
+                       input_dim: int) -> Optional[str]:
+        """Export XGBoost model to ONNX."""
+        return self.export_sklearn_model(model, model_name, input_dim)
+    
+    def export_decision_tree(self,
+                            model: Any,
+                            model_name: str, 
+                            input_dim: int) -> Optional[str]:
+        """Export Decision Tree to ONNX."""
+        return self.export_sklearn_model(model, model_name, input_dim)
+    
+    def verify_onnx_model(self, onnx_path: str) -> bool:
+        """Verify an ONNX model is valid."""
+        if not ONNX_AVAILABLE:
             return False
         
         try:
-            # Load ONNX model
-            session = ort.InferenceSession(onnx_path)
-            
-            # Get input info
-            input_name = session.get_inputs()[0].name
-            input_shape = session.get_inputs()[0].shape
-            
-            logger.info(f"ONNX input: {input_name}, shape: {input_shape}")
-            
-            # Create sample input if not provided
-            if sample_input is None:
-                if self.input_dim:
-                    sample_input = np.random.randn(1, self.input_dim).astype(np.float32)
-                else:
-                    sample_input = np.random.randn(1, 10).astype(np.float32)
-            
-            # Run inference
-            outputs = session.run(None, {input_name: sample_input})
-            
-            logger.info(f"ONNX output shapes: {[o.shape for o in outputs]}")
-            logger.info("ONNX verification: SUCCESS")
-            
+            onnx_model = onnx.load(onnx_path)
+            onnx.checker.check_model(onnx_model)
+            logger.info(f"ONNX model verified: {onnx_path}")
             return True
-            
         except Exception as e:
             logger.error(f"ONNX verification failed: {e}")
             return False
+    
+    def get_model_info(self, onnx_path: str) -> Dict[str, Any]:
+        """Get information about an ONNX model."""
+        if not ONNX_AVAILABLE:
+            return {"error": "onnx not available"}
+        
+        try:
+            onnx_model = onnx.load(onnx_path)
+            
+            # Get input/output info
+            inputs = []
+            for input in onnx_model.graph.input:
+                shape = [dim.dim_value if dim.dim_value else dim.dim_param 
+                        for dim in input.type.tensor_type.shape.dim]
+                inputs.append({
+                    'name': input.name,
+                    'shape': shape
+                })
+            
+            outputs = []
+            for output in onnx_model.graph.output:
+                shape = [dim.dim_value if dim.dim_value else dim.dim_param 
+                        for dim in output.type.tensor_type.shape.dim]
+                outputs.append({
+                    'name': output.name,
+                    'shape': shape
+                })
+            
+            return {
+                'valid': True,
+                'inputs': inputs,
+                'outputs': outputs,
+                'opset_version': onnx_model.opset_import[0].version if onnx_model.opset_import else None,
+                'producer': onnx_model.producer_name,
+            }
+        except Exception as e:
+            return {
+                'valid': False,
+                'error': str(e)
+            }
 
 
 class ONNXInference:
-    """ONNX model inference wrapper."""
+    """Inference using ONNX Runtime."""
     
-    def __init__(self, model_path: str):
-        if not ONNXRUNTIME_AVAILABLE:
-            raise RuntimeError("onnxruntime not available")
+    def __init__(self, onnx_path: str):
+        """
+        Initialize ONNX inference.
         
-        self.model_path = model_path
-        self.session = ort.InferenceSession(model_path)
-        self.input_name = self.session.get_inputs()[0].name
-        self.output_names = [o.name for o in self.session.get_outputs()]
+        Args:
+            onnx_path: Path to ONNX model file
+        """
+        self.onnx_path = onnx_path
+        self.session = None
+        self.input_name = None
+        self.output_names = None
         
-        # Load metadata if available
-        metadata_path = model_path.replace('.onnx', '_metadata.json')
-        self.metadata = {}
-        if Path(metadata_path).exists():
-            with open(metadata_path) as f:
-                self.metadata = json.load(f)
-        
-        logger.info(f"ONNX model loaded from {model_path}")
-        logger.info(f"Input: {self.input_name}, shape: {self.session.get_inputs()[0].shape}")
+        if ONNXRUNTIME_AVAILABLE:
+            self._load_session()
+        else:
+            logger.error("onnxruntime not available")
+    
+    def _load_session(self):
+        """Load ONNX Runtime session."""
+        try:
+            # Configure session for low memory usage
+            sess_options = ort.SessionOptions()
+            sess_options.intra_op_num_threads = 1
+            sess_options.inter_op_num_threads = 1
+            sess_options.graph_optimization_level = ort.GraphOptimizationLevel.BASIC_LEVEL
+            
+            self.session = ort.InferenceSession(
+                self.onnx_path, 
+                sess_options,
+                providers=['CPUExecutionProvider']
+            )
+            
+            # Get input/output names
+            self.input_name = self.session.get_inputs()[0].name
+            self.output_names = [o.name for o in self.session.get_outputs()]
+            
+            logger.info(f"ONNX session loaded: {self.onnx_path}")
+            
+        except Exception as e:
+            logger.error(f"Failed to load ONNX session: {e}")
+            self.session = None
     
     def predict(self, X: np.ndarray) -> np.ndarray:
-        """Run inference.
+        """
+        Run inference on input data.
         
         Args:
             X: Input features (n_samples, n_features)
@@ -159,17 +196,21 @@ class ONNXInference:
         Returns:
             Predictions
         """
+        if self.session is None:
+            raise RuntimeError("ONNX session not loaded")
+        
         # Ensure float32
         X = X.astype(np.float32)
         
         # Run inference
-        outputs = self.session.run(None, {self.input_name: X})
+        outputs = self.session.run(self.output_names, {self.input_name: X})
         
         # Return first output (predictions)
         return outputs[0]
     
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
-        """Get prediction probabilities.
+        """
+        Get prediction probabilities.
         
         Args:
             X: Input features
@@ -177,67 +218,105 @@ class ONNXInference:
         Returns:
             Class probabilities
         """
-        X = X.astype(np.float32)
-        outputs = self.session.run(None, {self.input_name: X})
+        if self.session is None:
+            raise RuntimeError("ONNX session not loaded")
         
-        # Usually second output is probabilities for classifiers
+        X = X.astype(np.float32)
+        outputs = self.session.run(self.output_names, {self.input_name: X})
+        
+        # Return second output if available (probabilities), else first
         if len(outputs) > 1:
             return outputs[1]
         return outputs[0]
     
-    def get_metadata(self) -> Dict[str, Any]:
-        """Get model metadata."""
+    def benchmark(self, X: np.ndarray, n_runs: int = 100) -> Dict[str, float]:
+        """Benchmark inference speed."""
+        import time
+        
+        if self.session is None:
+            return {"error": "Session not loaded"}
+        
+        X = X.astype(np.float32)
+        
+        # Warmup
+        for _ in range(10):
+            self.predict(X[:1])
+        
+        # Benchmark
+        times = []
+        for _ in range(n_runs):
+            start = time.time()
+            self.predict(X)
+            times.append(time.time() - start)
+        
         return {
-            'input_shape': self.session.get_inputs()[0].shape,
-            'output_shapes': [o.shape for o in self.session.get_outputs()],
-            'metadata': self.metadata,
+            'mean_ms': np.mean(times) * 1000,
+            'std_ms': np.std(times) * 1000,
+            'min_ms': np.min(times) * 1000,
+            'max_ms': np.max(times) * 1000,
+            'n_runs': n_runs
         }
 
 
-def export_model_to_onnx(model: Any, output_path: str, 
-                         feature_names: Optional[List[str]] = None,
-                         input_dim: Optional[int] = None) -> str:
-    """Convenience function to export a model to ONNX.
+def export_all_models(models: Dict[str, Any], 
+                     input_dim: int,
+                     output_dir: str = "./models/onnx") -> Dict[str, str]:
+    """
+    Export all models to ONNX format.
     
     Args:
-        model: Sklearn model to export
-        output_path: Path to save ONNX model
-        feature_names: Optional list of feature names
-        input_dim: Input dimension (inferred if not provided)
+        models: Dictionary of trained models
+        input_dim: Number of input features
+        output_dir: Output directory
     
     Returns:
-        Path to exported model
+        Dictionary mapping model names to ONNX paths
     """
-    exporter = ONNXExporter(model, feature_names)
-    return exporter.export(output_path, input_dim)
+    exporter = ONNXExporter(output_dir)
+    exported = {}
+    
+    for name, model in models.items():
+        if name == 'xgboost':
+            path = exporter.export_xgboost(model.model, 'xgboost', input_dim)
+        elif name == 'tree':
+            path = exporter.export_decision_tree(model.model, 'decision_tree', input_dim)
+        else:
+            path = exporter.export_sklearn_model(model, name, input_dim)
+        
+        if path:
+            exported[name] = path
+            exporter.verify_onnx_model(path)
+    
+    return exported
 
 
 if __name__ == '__main__':
     # Test ONNX export
     print("Testing ONNX export...")
     
+    # Create dummy model
     from sklearn.tree import DecisionTreeClassifier
-    from sklearn.datasets import make_classification
     
-    # Create sample model
-    X, y = make_classification(n_samples=100, n_features=10, n_informative=5, n_classes=3, random_state=42)
-    model = DecisionTreeClassifier(max_depth=5, random_state=42)
+    X = np.random.randn(100, 10)
+    y = np.random.choice([0, 1], 100)
+    
+    model = DecisionTreeClassifier(max_depth=5)
     model.fit(X, y)
     
-    # Export to ONNX
-    if SKL2ONNX_AVAILABLE:
-        output_path = "/tmp/test_model.onnx"
-        exporter = ONNXExporter(model, feature_names=[f"f{i}" for i in range(10)])
-        exporter.export(output_path, input_dim=10)
-        
-        # Verify
-        success = exporter.verify_export(output_path, X[:1].astype(np.float32))
-        print(f"Export verification: {'SUCCESS' if success else 'FAILED'}")
+    # Export
+    exporter = ONNXExporter()
+    onnx_path = exporter.export_sklearn_model(model, 'test_tree', 10)
+    
+    if onnx_path:
+        print(f"Exported to: {onnx_path}")
         
         # Test inference
-        if ONNXRUNTIME_AVAILABLE:
-            inference = ONNXInference(output_path)
-            predictions = inference.predict(X[:5])
-            print(f"Sample predictions: {predictions}")
+        inference = ONNXInference(onnx_path)
+        pred = inference.predict(X[:5])
+        print(f"Predictions: {pred}")
+        
+        # Benchmark
+        bench = inference.benchmark(X)
+        print(f"Benchmark: {bench['mean_ms']:.2f}ms avg")
     else:
-        print("skl2onnx not available, skipping test")
+        print("Export failed")
