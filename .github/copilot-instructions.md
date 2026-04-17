@@ -13,15 +13,16 @@
 ## Feature and Tensor Strategy
 - Prefer feature engineering that can scale toward 250+ features by combining technical indicators, smart money concepts, price action, spread tensors, and cross-timeframe aggregates.
 - Keep feature generation traceable: new features should have clear source columns, timeframe provenance, and compatibility with both training and live inference paths.
+- Use macro-mapping workflows that connect ingestion, storage, spread-tensor batches, model training, evaluation, and execution across trader, arbitrage, and DeFi model tracks.
 - Treat TensorFlow, TensorBoard, spread-tensor batching, and container-oriented tensor workflows as preferred extension points, but do not replace the current tree, boosting, GNN, or ONNX paths unless the user asks for that migration.
 
 ## Model Training and Selection
 - Maintain multiple candidate model families when possible, including tree, boosting, GNN, spread-tensor, arbitrage, and DeFi-oriented variants.
 - Do not hardcode a permanent winner. Persist model artifacts with metadata and metrics so the system can dynamically discover checkpoints and choose the best validated model.
-- When proposing model selection logic, surface the exact metrics used, the comparison window, and why the chosen model won.
+- When proposing model selection logic, prioritize backtest, PnL, and risk-adjusted trading outcomes first, then use classification metrics as secondary diagnostics. Always surface the exact metrics used, the comparison window, and why the chosen model won.
 
 ## Storage and Local Services
-- When shared state, caching, queues, or model registry coordination are needed, default to a localhost Redis workflow first.
+- Use a localhost Redis workflow as the default backing service for stateful local data, cache, queue, storage, and model-registry coordination.
 - Keep Redis and storage logic behind explicit abstractions, preferably in `tensor_trader/data/storage/` or closely related service modules, rather than scattering direct client calls.
 - Prefer container-friendly local development flows for services, batches, and supporting infrastructure.
 
