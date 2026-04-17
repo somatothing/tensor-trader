@@ -220,7 +220,7 @@ if __name__ == '__main__':
     from sklearn.datasets import make_classification
     
     # Create sample model
-    X, y = make_classification(n_samples=100, n_features=10, n_classes=3, random_state=42)
+    X, y = make_classification(n_samples=100, n_features=10, n_informative=5, n_classes=3, random_state=42)
     model = DecisionTreeClassifier(max_depth=5, random_state=42)
     model.fit(X, y)
     

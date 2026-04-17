@@ -1,0 +1,1 @@
+cd /Users/somatothing/Desktop/devs/repo_name/boards && git add -A && git commit -m "Add Spread-Tensor, Bitget/Hyperliquid connectors, fix ONNX export"
