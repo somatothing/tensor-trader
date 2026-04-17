@@ -1,0 +1,1 @@
+cd /Users/somatothing/Desktop/devs/repo_name/boards && git add -A && git commit -m "Add ONNX export and FastAPI serving layer"
