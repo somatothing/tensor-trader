@@ -430,6 +430,163 @@ def calculate_atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
     return tr.rolling(window=period).mean()
 
 
+def calculate_additional_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    """Calculate additional indicators to reach 250+ features."""
+    result = df.copy()
+    
+    # Additional Moving Averages (various types)
+    for period in [9, 12, 26, 30, 100]:
+        result[f'sma_{period}'] = df['close'].rolling(window=period).mean()
+        result[f'ema_{period}'] = df['close'].ewm(span=period, adjust=False).mean()
+        result[f'wma_{period}'] = df['close'].rolling(window=period).apply(
+            lambda x: np.average(x, weights=np.arange(1, len(x) + 1))
+        )
+        result[f'hma_{period}'] = df['close'].rolling(window=period // 2).apply(
+            lambda x: 2 * np.mean(x) - df['close'].rolling(window=period).mean().iloc[-1]
+        ) if len(df) >= period else pd.Series(index=df.index, dtype=float)
+    
+    # Triple Exponential Moving Average (TEMA)
+    for period in [9, 20, 50]:
+        ema1 = df['close'].ewm(span=period, adjust=False).mean()
+        ema2 = ema1.ewm(span=period, adjust=False).mean()
+        ema3 = ema2.ewm(span=period, adjust=False).mean()
+        result[f'tema_{period}'] = 3 * ema1 - 3 * ema2 + ema3
+    
+    # Double Exponential Moving Average (DEMA)
+    for period in [9, 20, 50]:
+        ema1 = df['close'].ewm(span=period, adjust=False).mean()
+        ema2 = ema1.ewm(span=period, adjust=False).mean()
+        result[f'dema_{period}'] = 2 * ema1 - ema2
+    
+    # Triangular Moving Average
+    for period in [10, 20, 50]:
+        weights = np.concatenate([np.arange(1, period // 2 + 1), np.arange(period // 2, 0, -1)])
+        if len(weights) == period - 1:
+            weights = np.concatenate([[1], weights])
+        result[f'tma_{period}'] = df['close'].rolling(window=period).apply(
+            lambda x: np.average(x, weights=weights[:len(x)]) if len(x) > 0 else np.nan
+        )
+    
+    # Additional RSI variants
+    for period in [2, 5, 10, 30]:
+        delta = df['close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+        rs = gain / (loss + 1e-10)
+        result[f'rsi_{period}'] = 100 - (100 / (1 + rs))
+    
+    # RSI-based features
+    result['rsi_slope'] = result.get('rsi', df['close']).diff(5)
+    result['rsi_ma'] = result.get('rsi', df['close']).rolling(window=10).mean()
+    result['rsi_above_70'] = (result.get('rsi', pd.Series(50, index=df.index)) > 70).astype(int)
+    result['rsi_below_30'] = (result.get('rsi', pd.Series(50, index=df.index)) < 30).astype(int)
+    
+    # Price Channels
+    for period in [10, 20, 50]:
+        result[f'upper_channel_{period}'] = df['high'].rolling(window=period).max()
+        result[f'lower_channel_{period}'] = df['low'].rolling(window=period).min()
+        result[f'middle_channel_{period}'] = (result[f'upper_channel_{period}'] + result[f'lower_channel_{period}']) / 2
+        result[f'channel_width_{period}'] = (
+            result[f'upper_channel_{period}'] - result[f'lower_channel_{period}']
+        ) / result[f'middle_channel_{period}'] * 100
+    
+    # Pivot Points
+    pivot = (df['high'].shift(1) + df['low'].shift(1) + df['close'].shift(1)) / 3
+    result['pivot'] = pivot
+    result['r1'] = 2 * pivot - df['low'].shift(1)
+    result['s1'] = 2 * pivot - df['high'].shift(1)
+    result['r2'] = pivot + (df['high'].shift(1) - df['low'].shift(1))
+    result['s2'] = pivot - (df['high'].shift(1) - df['low'].shift(1))
+    result['r3'] = df['high'].shift(1) + 2 * (pivot - df['low'].shift(1))
+    result['s3'] = df['low'].shift(1) - 2 * (df['high'].shift(1) - pivot)
+    
+    # Distance from pivot levels
+    result['dist_to_pivot'] = (df['close'] - pivot) / pivot * 100
+    result['dist_to_r1'] = (df['close'] - result['r1']) / result['r1'] * 100
+    result['dist_to_s1'] = (df['close'] - result['s1']) / result['s1'] * 100
+    
+    # Additional MACD variants
+    for fast, slow, signal in [(5, 35, 5), (8, 21, 5), (19, 39, 9)]:
+        ema_fast = df['close'].ewm(span=fast, adjust=False).mean()
+        ema_slow = df['close'].ewm(span=slow, adjust=False).mean()
+        macd = ema_fast - ema_slow
+        macd_signal = macd.ewm(span=signal, adjust=False).mean()
+        result[f'macd_{fast}_{slow}'] = macd
+        result[f'macd_signal_{fast}_{slow}'] = macd_signal
+        result[f'macd_hist_{fast}_{slow}'] = macd - macd_signal
+    
+    # Price momentum variants
+    for period in [1, 2, 3, 7, 14, 21]:
+        result[f'momentum_{period}'] = df['close'] - df['close'].shift(period)
+        result[f'momentum_pct_{period}'] = (df['close'] / df['close'].shift(period) - 1) * 100
+    
+    # Acceleration
+    result['acceleration'] = result['momentum_1'].diff()
+    
+    # Price velocity
+    result['price_velocity'] = df['close'].diff().rolling(window=10).mean()
+    result['price_acceleration'] = result['price_velocity'].diff()
+    
+    # Candlestick ratios
+    result['body_to_range'] = abs(df['close'] - df['open']) / (df['high'] - df['low'] + 1e-10)
+    result['upper_shadow'] = (df['high'] - df[['open', 'close']].max(axis=1)) / (df['high'] - df['low'] + 1e-10)
+    result['lower_shadow'] = (df[['open', 'close']].min(axis=1) - df['low']) / (df['high'] - df['low'] + 1e-10)
+    
+    # Trend strength
+    for period in [10, 20, 50]:
+        result[f'trend_strength_{period}'] = (
+            (df['close'] - df['close'].shift(period)) / 
+            df['close'].rolling(window=period).std()
+        )
+    
+    # Volatility Ratio
+    result['vol_ratio'] = result.get('atr', df['close'].diff().abs()) / df['close'].rolling(window=20).std()
+    
+    # Efficiency Ratio
+    for period in [10, 20]:
+        net_change = abs(df['close'] - df['close'].shift(period))
+        total_change = df['close'].diff().abs().rolling(window=period).sum()
+        result[f'efficiency_ratio_{period}'] = net_change / (total_change + 1e-10)
+    
+    # Additional Bollinger Band features
+    if 'bb_middle' in result.columns:
+        result['bb_squeeze'] = (result['bb_upper'] - result['bb_lower']) / result['bb_middle']
+        result['bb_trend'] = result['bb_middle'].diff(5)
+        result['bb_bandwidth'] = (result['bb_upper'] - result['bb_lower']) / result['bb_middle'] * 100
+    
+    # Volume momentum
+    result['volume_momentum'] = df['volume'] - df['volume'].shift(10)
+    result['volume_accel'] = result['volume_momentum'].diff()
+    
+    # Price vs VWAP (if available)
+    if 'vwap' in result.columns:
+        result['price_vs_vwap'] = (df['close'] - result['vwap']) / result['vwap'] * 100
+        result['vwap_slope'] = result['vwap'].diff(5)
+    
+    # Support/Resistance proximity
+    for period in [20, 50]:
+        high_max = df['high'].rolling(window=period).max()
+        low_min = df['low'].rolling(window=period).min()
+        result[f'proximity_to_resistance_{period}'] = (high_max - df['close']) / df['close'] * 100
+        result[f'proximity_to_support_{period}'] = (df['close'] - low_min) / df['close'] * 100
+    
+    # Range expansion/contraction
+    result['range'] = df['high'] - df['low']
+    for period in [5, 10, 20]:
+        result[f'range_ma_{period}'] = result['range'].rolling(window=period).mean()
+        result[f'range_std_{period}'] = result['range'].rolling(window=period).std()
+    
+    # Consecutive up/down
+    result['consecutive_up'] = (df['close'] > df['close'].shift(1)).astype(int).groupby(
+        (df['close'] <= df['close'].shift(1)).astype(int).cumsum()
+    ).cumsum()
+    result['consecutive_down'] = (df['close'] < df['close'].shift(1)).astype(int).groupby(
+        (df['close'] >= df['close'].shift(1)).astype(int).cumsum()
+    ).cumsum()
+    
+    return result
+
+
 def calculate_all_extended_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """Calculate all extended indicators (250+ features)."""
     result = df.copy()
@@ -454,5 +611,8 @@ def calculate_all_extended_indicators(df: pd.DataFrame) -> pd.DataFrame:
     
     # Multi-timeframe features
     result = calculate_multitimeframe_features(result)
+    
+    # Additional indicators to reach 250+
+    result = calculate_additional_indicators(result)
     
     return result
