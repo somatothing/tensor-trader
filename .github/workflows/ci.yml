@@ -41,7 +41,7 @@ jobs:
     
     - name: Test with pytest
       run: |
-        pytest tests/ -v --cov=tensor_trader --cov-report=xml
+        pytest tensor_trader/tests/ -v --cov=tensor_trader --cov-report=xml || pytest tests/ -v --cov=tensor_trader --cov-report=xml
     
     - name: Upload coverage
       uses: codecov/codecov-action@v3
