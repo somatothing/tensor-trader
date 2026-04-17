@@ -41,5 +41,5 @@ optuna>=3.4.0
 rich>=13.0.0
 textual>=0.41.0
 
-# MT5/cTrader connectors
-MetaTrader5>=5.0.45
+# MT5/cTrader connectors (optional - MetaTrader5 is Windows-only)
+# MetaTrader5>=5.0.45  # Uncomment on Windows systems
