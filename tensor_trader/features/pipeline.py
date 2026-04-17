@@ -43,7 +43,15 @@ class FeaturePipeline:
         
         # Drop rows with NaN values if requested
         if self.drop_na:
-            result = result.dropna()
+            # Use less aggressive dropping - handle NaN values intelligently
+            feature_cols = [col for col in result.columns if col not in required_cols]
+            if feature_cols:
+                # Fill NaN values: forward fill then backward fill
+                result[feature_cols] = result[feature_cols].ffill().bfill()
+                # Fill any remaining NaN with 0 (for columns like fvg_top that may be all NaN)
+                result[feature_cols] = result[feature_cols].fillna(0)
+                # Only drop rows that still have NaN (should be minimal now)
+                result = result.dropna()
         
         # Store feature column names (excluding OHLCV)
         self.feature_columns = [col for col in result.columns if col not in required_cols]

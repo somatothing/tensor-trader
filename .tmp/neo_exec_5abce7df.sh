@@ -1,0 +1,1 @@
+cd /Users/somatothing/Desktop/devs/repo_name/boards && git add -A && git commit -m "Fix feature pipeline NaN handling and add training pipeline with hyperparameters"
