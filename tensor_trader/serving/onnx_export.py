@@ -17,6 +17,15 @@ except ImportError:
     ONNX_AVAILABLE = False
     logger.warning("skl2onnx not available, ONNX export disabled")
 
+# Try to import onnxmltools for XGBoost
+try:
+    import onnxmltools
+    from onnxmltools.convert import convert_xgboost as onnxmltools_convert_xgboost
+    ONNXMLTOOLS_AVAILABLE = True
+except ImportError:
+    ONNXMLTOOLS_AVAILABLE = False
+    logger.warning("onnxmltools not available, XGBoost ONNX export disabled")
+
 try:
     import onnxruntime as ort
     ONNXRUNTIME_AVAILABLE = True
@@ -76,8 +85,31 @@ class ONNXExporter:
                        model: Any, 
                        model_name: str,
                        input_dim: int) -> Optional[str]:
-        """Export XGBoost model to ONNX."""
-        return self.export_sklearn_model(model, model_name, input_dim)
+        """Export XGBoost model to ONNX using onnxmltools."""
+        if not ONNXMLTOOLS_AVAILABLE:
+            logger.error("onnxmltools not available, cannot export XGBoost to ONNX")
+            return None
+        
+        try:
+            from onnxmltools.convert.common.data_types import FloatTensorType
+            
+            # Define input type
+            initial_type = [('float_input', FloatTensorType([None, input_dim]))]
+            
+            # Convert model using onnxmltools
+            onnx_model = onnxmltools_convert_xgboost(model, initial_types=initial_type)
+            
+            # Save model
+            output_path = self.output_dir / f"{model_name}.onnx"
+            with open(output_path, "wb") as f:
+                f.write(onnx_model.SerializeToString())
+            
+            logger.info(f"XGBoost model exported to {output_path}")
+            return str(output_path)
+            
+        except Exception as e:
+            logger.error(f"XGBoost ONNX export failed: {e}")
+            return None
     
     def export_decision_tree(self,
                             model: Any,
