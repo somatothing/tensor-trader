@@ -4,6 +4,7 @@ import numpy as np
 from typing import Dict, List, Optional
 
 from .indicators.technical import calculate_all_indicators
+from .indicators.extended_indicators import calculate_all_extended_indicators
 from .smc.smart_money import calculate_smc_features
 from .price_action.patterns import calculate_price_action_features
 
@@ -34,6 +35,9 @@ class FeaturePipeline:
         
         # Start with technical indicators
         result = calculate_all_indicators(df)
+        
+        # Add extended indicators (250+ features)
+        result = calculate_all_extended_indicators(result)
         
         # Add SMC features
         result = calculate_smc_features(result)
