@@ -251,18 +251,27 @@ class TestEndToEndPipeline:
     
     def test_full_pipeline(self):
         """Test complete pipeline from data to decision."""
-        # 1. Generate sample data
+        # 1. Generate sample data with realistic crypto volatility
         np.random.seed(42)
         n = 200
+        
+        # Bitcoin-like price with realistic volatility (~2-3% daily)
+        returns = np.random.randn(n) * 0.015  # 1.5% std dev
+        price = 50000 * np.exp(np.cumsum(returns))
+        
+        # Create OHLC from close
+        open_p = price * (1 + np.random.randn(n) * 0.005)
+        close = price
+        high = np.maximum(open_p, close) * (1 + np.abs(np.random.randn(n)) * 0.01 + 0.005)
+        low = np.minimum(open_p, close) * (1 - np.abs(np.random.randn(n)) * 0.01 - 0.005)
+        
         df = pd.DataFrame({
-            'open': np.random.randn(n).cumsum() + 50000,
-            'high': np.random.randn(n).cumsum() + 50100,
-            'low': np.random.randn(n).cumsum() + 49900,
-            'close': np.random.randn(n).cumsum() + 50000,
+            'open': open_p,
+            'high': high,
+            'low': low,
+            'close': close,
             'volume': np.random.randint(1000000, 10000000, n)
         })
-        df['high'] = np.maximum(df[['open', 'close']].max(axis=1) + 10, df['high'])
-        df['low'] = np.minimum(df[['open', 'close']].min(axis=1) - 10, df['low'])
         
         # 2. Generate features
         pipeline = FeaturePipeline()

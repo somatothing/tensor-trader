@@ -59,11 +59,13 @@ class SpreadTensorModel:
             Tensor representation (n_samples, n_components)
         """
         n_samples = X.shape[0]
+        actual_input_dim = X.shape[1]
         
-        # Initialize factors if not done
-        if not self.factors:
+        # Initialize factors if not done or if dimensions changed
+        if not self.factors or self.factors[0].shape[0] != actual_input_dim:
+            self.factors = []
             for r in range(self.tensor_rank):
-                factor = np.random.randn(self.input_dim, self.n_components) * 0.01
+                factor = np.random.randn(actual_input_dim, self.n_components) * 0.01
                 self.factors.append(factor)
         
         # Compute tensor decomposition
@@ -125,9 +127,6 @@ class SpreadTensorModel:
         """
         logger.info(f"Training Spread Tensor on {X.shape[0]} samples")
         
-        # Update input dimension
-        self.input_dim = X.shape[1]
-        
         # Compute spread features
         X_spread = self._compute_spreads(X)
         
@@ -158,21 +157,31 @@ class SpreadTensorModel:
             probs = exp_logits / np.sum(exp_logits, axis=1, keepdims=True)
             
             # Cross-entropy loss gradient
-            y_onehot = np.zeros((len(y), n_classes))
-            y_onehot[np.arange(len(y)), y_indices] = 1
+            one_hot = np.zeros_like(probs)
+            one_hot[np.arange(len(y_indices)), y_indices] = 1
             
-            grad = (probs - y_onehot) / len(y)
+            grad_logits = (probs - one_hot) / len(y_indices)
+            grad_weights = tensor_repr.T @ grad_logits
+            grad_bias = np.sum(grad_logits, axis=0)
             
             # Update weights
-            self.classifier_weights -= learning_rate * (tensor_repr.T @ grad)
-            self.classifier_bias -= learning_rate * np.sum(grad, axis=0)
+            self.classifier_weights -= learning_rate * grad_weights
+            self.classifier_bias -= learning_rate * grad_bias
         
         self.is_trained = True
         logger.info("Spread Tensor training completed")
         return self
     
     def predict(self, X: np.ndarray) -> np.ndarray:
-        """Make predictions."""
+        """
+        Make predictions.
+        
+        Args:
+            X: Feature matrix
+        
+        Returns:
+            Predictions
+        """
         if not self.is_trained:
             raise RuntimeError("Model must be trained before prediction")
         
@@ -184,13 +193,21 @@ class SpreadTensorModel:
         
         # Forward pass
         logits = tensor_repr @ self.classifier_weights + self.classifier_bias
+        predictions_idx = np.argmax(logits, axis=1)
         
-        # Get predicted class
-        pred_indices = np.argmax(logits, axis=1)
-        return self.classes_[pred_indices]
+        # Map back to original labels
+        return self.classes_[predictions_idx]
     
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
-        """Get prediction probabilities."""
+        """
+        Get prediction probabilities.
+        
+        Args:
+            X: Feature matrix
+        
+        Returns:
+            Probabilities for each class
+        """
         if not self.is_trained:
             raise RuntimeError("Model must be trained before prediction")
         
@@ -209,54 +226,32 @@ class SpreadTensorModel:
         
         return probs
     
-    def save(self, filepath: str):
-        """Save model to disk."""
-        data = {
-            'factors': self.factors,
-            'weights': self.weights,
-            'classifier_weights': self.classifier_weights,
-            'classifier_bias': self.classifier_bias,
-            'is_trained': self.is_trained,
-            'classes': self.classes_,
-            'input_dim': self.input_dim,
-            'tensor_rank': self.tensor_rank,
-            'n_components': self.n_components,
-        }
+    def save(self, filepath: str) -> None:
+        """Save model to file."""
         with open(filepath, 'wb') as f:
-            pickle.dump(data, f)
-        logger.info(f"Model saved to {filepath}")
+            pickle.dump({
+                'factors': self.factors,
+                'weights': self.weights,
+                'classifier_weights': self.classifier_weights,
+                'classifier_bias': self.classifier_bias,
+                'is_trained': self.is_trained,
+                'classes_': self.classes_,
+                'input_dim': self.input_dim,
+                'tensor_rank': self.tensor_rank,
+                'n_components': self.n_components
+            }, f)
     
     def load(self, filepath: str) -> 'SpreadTensorModel':
-        """Load model from disk."""
+        """Load model from file."""
         with open(filepath, 'rb') as f:
             data = pickle.load(f)
-        
-        self.factors = data['factors']
-        self.weights = data['weights']
-        self.classifier_weights = data['classifier_weights']
-        self.classifier_bias = data['classifier_bias']
-        self.is_trained = data['is_trained']
-        self.classes_ = data['classes']
-        self.input_dim = data['input_dim']
-        self.tensor_rank = data['tensor_rank']
-        self.n_components = data['n_components']
-        
-        logger.info(f"Model loaded from {filepath}")
+            self.factors = data['factors']
+            self.weights = data['weights']
+            self.classifier_weights = data['classifier_weights']
+            self.classifier_bias = data['classifier_bias']
+            self.is_trained = data['is_trained']
+            self.classes_ = data['classes_']
+            self.input_dim = data['input_dim']
+            self.tensor_rank = data['tensor_rank']
+            self.n_components = data['n_components']
         return self
-
-
-if __name__ == '__main__':
-    # Test with dummy data
-    np.random.seed(42)
-    X = np.random.randn(500, 30)
-    y = np.random.choice([-1, 0, 1], size=500)
-    
-    model = SpreadTensorModel(input_dim=30, n_components=8)
-    model.fit(X, y)
-    
-    # Test prediction
-    predictions = model.predict(X[:10])
-    print(f"Sample predictions: {predictions}")
-    
-    probabilities = model.predict_proba(X[:5])
-    print(f"Sample probabilities shape: {probabilities.shape}")
