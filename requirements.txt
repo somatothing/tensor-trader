@@ -16,7 +16,7 @@ aiohttp>=3.8.0
 ccxt>=4.0.0
 
 # Feature Engineering
-ta-lib>=0.4.0
+# ta-lib>=0.4.0  # Requires system TA-Lib C library - install manually
 pandas-ta>=0.3.0
 
 # Serving
